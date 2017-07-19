@@ -77,7 +77,35 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        selected_model = None
+        likelihood_score = float('inf')
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            # iterate over the states
+
+            try:
+                hmm_model = self.base_model(num_states=n)  # obtain and assign model for given state
+                LogL = hmm_model.score(self.X, self.lengths)
+                # using hmmlearn calculate the log probability for sample
+                # X - matrix of word samples, lengths - length of individual sample
+                # calculating likelihood of given sample
+                LogN = np.log(sum(self.lengths))
+                # using np calculate the log probability for sum of the sizes of the samples
+
+                p = np.power(n, 2) + 2 * len(self.sequences) * n - 1
+                # calculates K - number of free parameters
+
+                if hmm_model is not None:  # making sure the model is not empty
+                    bic = -2 * LogL + p * LogN  # input the variables into the BIC formula
+                    if bic < likelihood_score:  # check if calculated BIC is lower than the current estimate
+                        likelihood_score = bic
+                        selected_model = hmm_model
+
+            except:
+                if self.verbose:
+                    print("BIC failure on {} with {} states".format(self.this_word, n))
+
+            return selected_model
 
 
 class SelectorDIC(ModelSelector):
@@ -93,8 +121,34 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        selected_model = None
+        likelihood_score = float('inf')
 
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            # iterate over the states
+
+            try:
+                hmm_model = self.base_model(num_states=n) # obtain and assign model for given state
+                LogL = hmm_model.score(self.X, self.lengths)
+
+                other_word_sum = 0.0  # sum of Likelihood score for other word
+                for word in self.words:  # iterate through each word in sequence
+                    if word != self.this_word:  # check that word is not the current word
+                        oth_word, oth_lengths = self.hwords[word]  # obtain the length sequence for the word
+                        other_word_sum += hmm_model.score(oth_word, oth_lengths)
+                        # calculate the sum of the likelihood of all words that are not this_word
+
+                    other_word_mean = other_word_sum / (len(self.words) - 1)
+                    # calculate mean likelihood of all the words except i - the anti-likelihood
+                    dic = LogL - other_word_mean # input the different likelihoods into calculating the DIC
+                    if dic < likelihood_score:  # check if calculated DIC is lower than the current estimate
+                        likelihood_score = dic
+                        selected_model = hmm_model
+            except:
+                if self.verbose:
+                    print("BIC failure on {} with {} states".format(self.this_word, n))
+
+            return selected_model
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
@@ -105,4 +159,32 @@ class SelectorCV(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        raise NotImplementedError
+        best_score = float('-inf')
+        selected_model = None
+        scores = []
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            n_splits_check = min(3, len(self.sequences))  # handles words that don't have the default 3
+            hmm_model = self.base_model(n)
+
+            split_method = KFold(random_state=self.random_state, n_splits=n_splits_check) # utilize KFold to split data
+            for train_id, test_id in split_method.split(self.sequences):#iterate the partitions of the sequences
+                # setup the training dataset
+                train_X,train_Xlengths = combine_sequences(train_id, self.sequences)
+                # steup the testing dataset
+                test_X, test_Xlengths = combine_sequences(test_id, self.sequences)
+                try:
+                    hmm_model.fit(train_X, train_Xlengths) # update model with training dataset
+                    likelihood_score = hmm_model.score(test_X, test_Xlengths) # calculate likilihood score for test dataset
+                    scores.append(likelihood_score)
+                except:
+                    pass
+            mean = np.mean(scores)  # calculate the mean of list
+            if mean > best_score:  # check if mean i higher than current best_score
+                best_score = mean
+                selected_model = hmm_model
+
+        return selected_model
+
+
+
